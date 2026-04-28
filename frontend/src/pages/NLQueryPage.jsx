@@ -5,7 +5,7 @@ import ResultTable from '../components/ResultTable';
 
 const EXAMPLES = [
   'Show all active ONT devices from the last 30 days',
-  'Find all OLT entries where status is DOWN, ordered by date',
+  'Show availability for ONT serial number 1234 from 1 Jan to 31 Jan',
   'Count devices grouped by status',
 ];
 

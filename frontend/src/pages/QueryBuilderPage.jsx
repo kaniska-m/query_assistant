@@ -5,6 +5,7 @@ import ColumnSelector from '../components/ColumnSelector';
 import FilterBuilder from '../components/FilterBuilder';
 import QueryPreview from '../components/QueryPreview';
 import ResultTable from '../components/ResultTable';
+import SmartQueryBuilder from '../components/SmartQueryBuilder';
 
 const DEFAULT_FILTERS = { logic: 'AND', conditions: [] };
 
@@ -32,6 +33,7 @@ function StepIndicator({ table, columns, generatedSQL }) {
 }
 
 export default function QueryBuilderPage({ onAddHistory }) {
+  const [mode, setMode] = useState('smart');
   const [table, setTable] = useState('');
   const [columns, setColumns] = useState([]);
   const [allColumns, setAllColumns] = useState([]);
@@ -103,16 +105,54 @@ export default function QueryBuilderPage({ onAddHistory }) {
     setGeneratedSQL(''); setEditSQL(''); setResult(null); setError(null);
   };
 
+  const TAB_STYLES = (active) => ({
+    padding: '9px 20px',
+    background: active ? 'var(--amber-glow)' : 'var(--bg-2)',
+    border: 'none',
+    borderBottom: active ? '2px solid var(--amber)' : '2px solid transparent',
+    color: active ? 'var(--amber)' : 'var(--text-2)',
+    fontFamily: 'var(--mono)',
+    fontSize: 12,
+    fontWeight: active ? 600 : 400,
+    cursor: 'pointer',
+    transition: 'all 0.15s',
+  });
+
   return (
     <div className="page-content">
       <div className="page-header">
         <div>
           <div className="page-title">⊞ Query Builder</div>
-          <div className="page-subtitle">Build queries step by step — no SQL required</div>
+          <div className="page-subtitle">Build queries visually — no SQL required</div>
         </div>
-        <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={reset}>↺ Reset</button>
+        {mode === 'generic' && (
+          <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={reset}>↺ Reset</button>
+        )}
       </div>
 
+      {/* Mode Tab Switcher */}
+      <div style={{
+        display: 'flex', marginBottom: 20,
+        borderBottom: '1px solid var(--border)',
+        background: 'var(--bg-2)',
+        borderRadius: 'var(--radius) var(--radius) 0 0',
+        overflow: 'hidden',
+      }}>
+        <button style={TAB_STYLES(mode === 'smart')} onClick={() => setMode('smart')}>
+          ⚡ Smart Builder
+          <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.7 }}>RM_ONT · RM_ONT_HISTORY</span>
+        </button>
+        <button style={TAB_STYLES(mode === 'generic')} onClick={() => setMode('generic')}>
+          ⊞ Generic Builder
+          <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.7 }}>All tables</span>
+        </button>
+      </div>
+
+      {/* Smart Builder */}
+      {mode === 'smart' && <SmartQueryBuilder onAddHistory={onAddHistory} />}
+
+      {/* Generic Builder */}
+      {mode === 'generic' && <>
       <StepIndicator table={table} columns={columns} generatedSQL={generatedSQL} />
 
       <div className="split-layout wide-left">
@@ -252,6 +292,7 @@ export default function QueryBuilderPage({ onAddHistory }) {
           )}
         </div>
       </div>
+      </>}
     </div>
   );
 }
