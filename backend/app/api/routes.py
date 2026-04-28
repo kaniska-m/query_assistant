@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from app.services.db_service import execute_query
+from app.services.nl_services import nl_to_sql
 from app.services.metadata_service import (
     get_tables,
     get_columns,
@@ -13,7 +14,7 @@ router = APIRouter()
 
 
 # 🔷 1. DIRECT SQL EXECUTOR (your existing feature)
-@router.post("/execute-sql")
+@router.post("/execute_sql")
 def execute_sql(payload: dict):
     query = payload.get("query")
 
@@ -74,6 +75,16 @@ def generate_query(payload: dict):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.post("/nl-to-sql")
+def natural_language_to_sql(payload: dict):
+    prompt = payload.get("prompt")
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt is required")
+    try:
+        query = nl_to_sql(prompt)
+        return {"query": query}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # 🔷 6. QUERY BUILDER → EXECUTE
 @router.post("/query-builder/execute")
@@ -95,3 +106,5 @@ def execute_builder(payload: dict):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
