@@ -57,13 +57,13 @@ export default function QueryBuilderPage({ onAddHistory }) {
       .catch(() => {});
   }, [table]);
 
+  // WITH THIS:
   const buildPayload = () => ({
     table,
-    columns: columns.length ? columns : allColumns.map(c => c.name),
+    columns: columns.length ? columns : ['*'],
     filters,
-    order_by: orderBy || undefined,
-    order_dir: orderDir,
-    limit: limit ? parseInt(limit) : undefined,
+    order_by: orderBy ? { column: orderBy, direction: orderDir } : undefined,
+    limit: limit ? parseInt(limit) : 100,
   });
 
   const generateQuery = async () => {
