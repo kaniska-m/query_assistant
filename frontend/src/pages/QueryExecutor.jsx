@@ -8,6 +8,44 @@ const EXAMPLE_QUERIES = [
   'SELECT * FROM RM_ALARM WHERE ROWNUM <= 5',
 ];
 
+function downloadExcel(columns, data) {
+  // Build rows as plain objects
+  const rows = data.map(row => {
+    if (Array.isArray(row)) {
+      const obj = {};
+      columns.forEach((col, i) => { obj[col] = row[i]; });
+      return obj;
+    }
+    return row;
+  });
+
+  // Build CSV content (Excel opens CSV fine, or use TSV for safety)
+  const escape = (val) => {
+    if (val === null || val === undefined) return '';
+    const str = String(val);
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const csvLines = [
+    columns.map(escape).join(','),
+    ...rows.map(row => columns.map(col => escape(row[col])).join(','))
+  ];
+  const csvContent = csvLines.join('\n');
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `query_result_${new Date().toISOString().slice(0,19).replace(/[T:]/g, '-')}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 export default function QueryExecutor({ onAddHistory }) {
   const [sql, setSql] = useState('');
   const [result, setResult] = useState(null);
@@ -19,7 +57,6 @@ export default function QueryExecutor({ onAddHistory }) {
     setLoading(true);
     setError(null);
     setResult(null);
-    const start = Date.now();
     try {
       const res = await api.executeSQL(sql);
       setResult(res);
@@ -59,7 +96,7 @@ export default function QueryExecutor({ onAddHistory }) {
                 value={sql}
                 onChange={e => setSql(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="-- Write your SQL here&#10;SELECT * FROM RM_ONT WHERE STATUS = 'ACTIVE' LIMIT 50;"
+                placeholder={"-- Write your SQL here\nSELECT * FROM RM_ONT WHERE STATUS = 'ACTIVE' AND ROWNUM <= 50;"}
                 spellCheck={false}
               />
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
@@ -101,6 +138,16 @@ export default function QueryExecutor({ onAddHistory }) {
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <span className="tag tag-green">{result.data?.length ?? 0} rows</span>
                   {result.execution_time && <span className="tag tag-amber">⏱ {result.execution_time}</span>}
+                  {result.data?.length > 0 && (
+                    <button
+                      className="btn btn-ghost"
+                      style={{ padding: '4px 10px', fontSize: 11 }}
+                      onClick={() => downloadExcel(result.columns, result.data)}
+                      title="Download as Excel/CSV"
+                    >
+                      ⬇ Export
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="card-body" style={{ padding: 0 }}>
