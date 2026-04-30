@@ -1,130 +1,10 @@
 import { useState } from 'react';
-import { api } from '../api/api';
+import { useQueryExecution } from '../hooks/useQueryExecution';
+import { SCHEMAS, QUICK_COLS, ORDER_COLS, buildSQL, defaultForm } from '../constants/smartQuerySchema';
 import QueryPreview from './QueryPreview';
-import ResultTable from './ResultTable';
-import ExportButton from '../components/ExportButton';  
-
-const SCHEMAS = {
-  RM_ONT: {
-    label: 'RM_ONT',
-    desc: 'Current ONT device info & state',
-    serialCol: 'SERIAL_NO',
-    dateColOptions: [
-      { label: 'Timestamp', col: 'TIME_STAMP' },
-      { label: 'Commission Date', col: 'COMMISSION_DATE' },
-      { label: 'State Change Time', col: 'STATE_CHANGE_TIME' },
-      { label: 'NW Entry Time', col: 'NW_ENTRY_TIME' },
-      { label: 'NMS Config Date', col: 'NMS_CONFIG_DATE' },
-    ],
-    statusCol: 'APP_STATUS',
-    statusOptions: ['READY', 'SW-INIT-RESET', 'UPGRADING', 'UNKNOWN'],
-    stateCol: 'STATE',
-    stateOptions: ['0', '1', '2', '3', '4', '7'],
-    phyStatusCol: 'PHY_STATUS',
-    phyStatusOptions: ['ACTIVATED', 'ACTIVATE-PENDING', 'MISSING', 'DEACTIVATED'],
-    extraFields: [
-      { label: 'OLT IP', col: 'OLT_IP', type: 'text' },
-      { label: 'ONT IP', col: 'ONT_IP', type: 'text' },
-      { label: 'Location ID', col: 'LOCATION_ID', type: 'number' },
-      { label: 'OLT PIC PON ID', col: 'OLT_PIC_PON_ID', type: 'number' },
-    ],
-  },
-  RM_ONT_HISTORY: {
-    label: 'RM_ONT_HISTORY',
-    desc: 'ONT historical state changes & availability',
-    serialCol: 'SERIAL_NO',
-    dateColOptions: [
-      { label: 'Timestamp', col: 'TIME_STAMP' },
-      { label: 'Commission Date', col: 'COMMISSION_DATE' },
-      { label: 'State Change Time', col: 'STATE_CHANGE_TIME' },
-      { label: 'NW Entry Time', col: 'NW_ENTRY_TIME' },
-      { label: 'NMS Config Date', col: 'NMS_CONFIG_DATE' },
-    ],
-    statusCol: 'APP_STATUS',
-    statusOptions: ['READY', 'SW-INIT-RESET', 'UPGRADING', 'UNKNOWN'],
-    stateCol: 'STATE',
-    stateOptions: ['0', '1', '2', '3', '4', '7'],
-    phyStatusCol: 'PHY_STATUS',
-    phyStatusOptions: ['ACTIVATED', 'ACTIVATE-PENDING', 'MISSING', 'DEACTIVATED'],
-    extraFields: [
-      { label: 'OLT IP', col: 'OLT_IP', type: 'text' },
-      { label: 'ONT IP', col: 'ONT_IP', type: 'text' },
-      { label: 'Location ID', col: 'LOCATION_ID', type: 'number' },
-      { label: 'CCU', col: 'CCU', type: 'number' },
-    ],
-  },
-};
-
-const QUICK_COLS = {
-  RM_ONT: [
-    'SERIAL_NO', 'NAME', 'ONT_ID', 'ONT_IP', 'OLT_IP',
-    'APP_STATUS', 'PHY_STATUS', 'STATE', 'TIME_STAMP',
-    'STATE_CHANGE_TIME', 'COMMISSION_DATE', 'LOCATION_ID',
-    'OLT_PIC_PON_ID', 'REMARKS', 'VERSION',
-  ],
-  RM_ONT_HISTORY: [
-    'SERIAL_NO', 'NAME', 'ONT_ID', 'ONT_IP', 'OLT_IP',
-    'APP_STATUS', 'PHY_STATUS', 'STATE', 'TIME_STAMP',
-    'STATE_CHANGE_TIME', 'COMMISSION_DATE', 'LOCATION_ID',
-    'CCU', 'REMARKS', 'VERSION',
-  ],
-};
-
-const ORDER_COLS = {
-  RM_ONT: ['TIME_STAMP', 'SERIAL_NO', 'APP_STATUS', 'PHY_STATUS', 'STATE', 'STATE_CHANGE_TIME', 'COMMISSION_DATE', 'NW_ENTRY_TIME'],
-  RM_ONT_HISTORY: ['TIME_STAMP', 'SERIAL_NO', 'APP_STATUS', 'PHY_STATUS', 'STATE', 'STATE_CHANGE_TIME', 'COMMISSION_DATE', 'NW_ENTRY_TIME'],
-};
-
-function buildSQL(table, form) {
-  const schema = SCHEMAS[table];
-  const conditions = [];
-  const dateCol = form.dateCol || schema.dateColOptions[0].col;
-
-  if (form.serialNo?.trim())
-    conditions.push(`${schema.serialCol} = '${form.serialNo.trim()}'`);
-  if (form.dateFrom)
-    conditions.push(`${dateCol} >= TO_DATE('${form.dateFrom}', 'YYYY-MM-DD')`);
-  if (form.dateTo)
-    conditions.push(`${dateCol} <= TO_DATE('${form.dateTo}', 'YYYY-MM-DD')`);
-  if (form.appStatus)
-    conditions.push(`${schema.statusCol} = '${form.appStatus}'`);
-  if (form.phyStatus)
-    conditions.push(`${schema.phyStatusCol} = '${form.phyStatus}'`);
-  if (form.state !== '')
-    conditions.push(`${schema.stateCol} = ${form.state}`);
-
-  schema.extraFields?.forEach(f => {
-    const val = form.extra?.[f.col]?.toString().trim();
-    if (val) {
-      conditions.push(
-        f.type === 'number' ? `${f.col} = ${val}` : `${f.col} = '${val}'`
-      );
-    }
-  });
-
-  const cols = form.selectedCols?.length ? form.selectedCols.join(', ') : '*';
-  let sql = `SELECT ${cols}\nFROM ${table}`;
-
-  if (conditions.length > 0) {
-    sql += `\nWHERE ` + conditions.join('\n  AND ');
-    sql += `\n  AND ROWNUM <= ${form.limit || 100}`;
-  } else {
-    sql += `\nWHERE ROWNUM <= ${form.limit || 100}`;
-  }
-
-  if (form.orderBy)
-    sql += `\nORDER BY ${form.orderBy} ${form.orderDir || 'DESC'}`;
-
-  return sql;
-}
-
-const defaultForm = (schema) => ({
-  serialNo: '', dateFrom: '', dateTo: '',
-  dateCol: schema.dateColOptions[0].col,
-  appStatus: '', state: '', phyStatus: '',
-  extra: {}, selectedCols: [],
-  orderBy: 'TIME_STAMP', orderDir: 'DESC', limit: '100',
-});
+import SqlEditor from './ui/SqlEditor';
+import ResultsCard from './ui/ResultsCard';
+import ExportButton from './ExportButton';
 
 export default function SmartQueryBuilder({ onAddHistory }) {
   const [activeTable, setActiveTable] = useState('RM_ONT');
@@ -135,9 +15,7 @@ export default function SmartQueryBuilder({ onAddHistory }) {
   const [sqls, setSqls] = useState({ RM_ONT: '', RM_ONT_HISTORY: '' });
   const [editSQL, setEditSQL] = useState('');
   const [isEditing, setIsEditing] = useState(false);
-  const [result, setResult] = useState(null);
-  const [executing, setExecuting] = useState(false);
-  const [error, setError] = useState(null);
+  const { result, executing, error, execute, reset: resetResult } = useQueryExecution(onAddHistory);
 
   const schema = SCHEMAS[activeTable];
   const form = forms[activeTable];
@@ -148,8 +26,7 @@ export default function SmartQueryBuilder({ onAddHistory }) {
     setForms(prev => ({ ...prev, [activeTable]: updated }));
     setSqls(prev => ({ ...prev, [activeTable]: buildSQL(activeTable, updated) }));
     setIsEditing(false);
-    setResult(null);
-    setError(null);
+    resetResult();
   };
 
   const updateExtra = (col, val) => updateForm({ extra: { ...form.extra, [col]: val } });
@@ -163,35 +40,19 @@ export default function SmartQueryBuilder({ onAddHistory }) {
 
   const switchTable = (table) => {
     setActiveTable(table);
-    setResult(null);
-    setError(null);
     setIsEditing(false);
+    resetResult();
   };
 
   const resetForm = () => {
     const fresh = defaultForm(schema);
     setForms(prev => ({ ...prev, [activeTable]: fresh }));
     setSqls(prev => ({ ...prev, [activeTable]: '' }));
-    setResult(null);
-    setError(null);
     setIsEditing(false);
+    resetResult();
   };
 
-  const execute = async () => {
-    const sqlToRun = isEditing ? editSQL : generatedSQL;
-    if (!sqlToRun) return;
-    setExecuting(true);
-    setError(null);
-    try {
-      const res = await api.executeSQL(sqlToRun);
-      setResult(res);
-      onAddHistory?.({ sql: sqlToRun, timestamp: new Date().toISOString(), execTime: res.execution_time });
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setExecuting(false);
-    }
-  };
+  const handleExecute = () => execute(isEditing ? editSQL : generatedSQL);
 
   const hasFilters = form.serialNo || form.dateFrom || form.dateTo ||
     form.appStatus || form.phyStatus || form.state ||
@@ -280,7 +141,9 @@ export default function SmartQueryBuilder({ onAddHistory }) {
             <div className="card-body">
               <div className="section-gap">
                 <div className="form-group">
-                  <label className="form-label">App Status <span style={{ color: 'var(--text-2)' }}>({schema.statusCol} · VARCHAR2)</span></label>
+                  <label className="form-label">
+                    App Status <span style={{ color: 'var(--text-2)' }}>({schema.statusCol})</span>
+                  </label>
                   <select className="form-control" value={form.appStatus}
                     onChange={e => updateForm({ appStatus: e.target.value })}>
                     <option value="">— any —</option>
@@ -288,7 +151,9 @@ export default function SmartQueryBuilder({ onAddHistory }) {
                   </select>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Physical Status <span style={{ color: 'var(--text-2)' }}>({schema.phyStatusCol} · VARCHAR2)</span></label>
+                  <label className="form-label">
+                    Physical Status <span style={{ color: 'var(--text-2)' }}>({schema.phyStatusCol})</span>
+                  </label>
                   <select className="form-control" value={form.phyStatus}
                     onChange={e => updateForm({ phyStatus: e.target.value })}>
                     <option value="">— any —</option>
@@ -296,7 +161,9 @@ export default function SmartQueryBuilder({ onAddHistory }) {
                   </select>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">State <span style={{ color: 'var(--text-2)' }}>({schema.stateCol} · NUMBER)</span></label>
+                  <label className="form-label">
+                    State <span style={{ color: 'var(--text-2)' }}>({schema.stateCol} · NUMBER)</span>
+                  </label>
                   <select className="form-control" value={form.state}
                     onChange={e => updateForm({ state: e.target.value })}>
                     <option value="">— any —</option>
@@ -374,8 +241,9 @@ export default function SmartQueryBuilder({ onAddHistory }) {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary" onClick={execute} disabled={executing}>
+          {/* Actions */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" onClick={handleExecute} disabled={executing}>
               {executing ? <><div className="spinner" /> Executing...</> : '▶ Execute Query'}
             </button>
             <button className="btn btn-ghost" onClick={resetForm}>↺ Reset</button>
@@ -388,21 +256,12 @@ export default function SmartQueryBuilder({ onAddHistory }) {
           {error && <div className="alert alert-error">⚠ {error}</div>}
 
           {isEditing ? (
-            <div className="card">
-              <div className="card-header" style={{ justifyContent: 'space-between' }}>
-                <span className="card-title">Edit SQL</span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 11 }}
-                    onClick={() => setIsEditing(false)}>✕ Cancel</button>
-                  <button className="btn btn-primary" style={{ padding: '4px 10px', fontSize: 11 }}
-                    onClick={() => { setSqls(p => ({ ...p, [activeTable]: editSQL })); setIsEditing(false); }}>✓ Save</button>
-                </div>
-              </div>
-              <div className="card-body">
-                <textarea className="form-control" style={{ minHeight: 180, fontSize: 13 }}
-                  value={editSQL} onChange={e => setEditSQL(e.target.value)} spellCheck={false} />
-              </div>
-            </div>
+            <SqlEditor
+              sql={editSQL}
+              onChange={setEditSQL}
+              onSave={() => { setSqls(p => ({ ...p, [activeTable]: editSQL })); setIsEditing(false); }}
+              onCancel={() => setIsEditing(false)}
+            />
           ) : (
             <QueryPreview
               sql={generatedSQL}
@@ -410,6 +269,7 @@ export default function SmartQueryBuilder({ onAddHistory }) {
             />
           )}
 
+          {/* Active Filter Tags */}
           {hasFilters && (
             <div className="card">
               <div className="card-header"><span className="card-title">Active Filters</span></div>
@@ -427,31 +287,7 @@ export default function SmartQueryBuilder({ onAddHistory }) {
             </div>
           )}
 
-          {result ? (
-            <div className="card">
-              <div className="card-header" style={{ justifyContent: 'space-between' }}>
-                <span className="card-title">Results</span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <span className="tag tag-green">{result.data?.length ?? 0} rows</span>
-                  {result.execution_time && <span className="tag tag-amber">⏱ {result.execution_time}</span>}
-                </div>
-              </div>
-              <div className="card-body" style={{ padding: 0 }}>
-                <ResultTable columns={result.columns} data={result.data}
-                  execTime={result.execution_time} rowCount={result.data?.length} />
-              </div>
-            </div>
-          ) : (
-            <div className="card">
-              <div className="card-body">
-                <div className="empty-state">
-                  <div className="empty-icon">◌</div>
-                  <p>SQL is auto-generated as you fill the form</p>
-                  <p style={{ marginTop: 6 }}>Click Execute when ready</p>
-                </div>
-              </div>
-            </div>
-          )}
+          <ResultsCard result={result} emptyMessage="Fill the form and click Execute to see results" />
         </div>
       </div>
     </div>

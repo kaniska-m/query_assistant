@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import { api } from '../api/api';
+import { useQueryExecution } from '../hooks/useQueryExecution';
+import PageHeader from '../components/ui/PageHeader';
+import SqlEditor from '../components/ui/SqlEditor';
+import ResultsCard from '../components/ui/ResultsCard';
 import QueryPreview from '../components/QueryPreview';
-import ResultTable from '../components/ResultTable';
-import ExportButton from '../components/ExportButton';  
+import ExportButton from '../components/ExportButton';
 
 const EXAMPLES = [
   'Show 10 active ONTs from RM_ONT where APP_STATUS is Active and the ont_id is 123',
@@ -16,58 +19,36 @@ export default function NLQueryPage({ onAddHistory }) {
   const [generatedSQL, setGeneratedSQL] = useState('');
   const [editSQL, setEditSQL] = useState('');
   const [isEditing, setIsEditing] = useState(false);
-  const [result, setResult] = useState(null);
   const [generating, setGenerating] = useState(false);
-  const [executing, setExecuting] = useState(false);
-  const [error, setError] = useState(null);
+  const [nlError, setNlError] = useState(null);
+  const { result, executing, error, execute } = useQueryExecution(onAddHistory);
 
   const generateFromNL = async () => {
     if (!prompt.trim()) return;
     setGenerating(true);
-    setError(null);
     setGeneratedSQL('');
     setEditSQL('');
     setIsEditing(false);
-    setResult(null);
+    setNlError(null); 
     try {
       const res = await api.nlToSQL(prompt);
       const sql = res.query || res.sql || '';
       setGeneratedSQL(sql);
       setEditSQL(sql);
     } catch (e) {
-      setError(e.message);
+      setNlError(e.message);
     } finally {
       setGenerating(false);
     }
   };
 
-  const execute = async () => {
-    const sqlToRun = isEditing ? editSQL : generatedSQL;
-    if (!sqlToRun) return;
-    setExecuting(true);
-    setError(null);
-    try {
-      const res = await api.executeSQL(sqlToRun);
-      setResult(res);
-      onAddHistory?.({ sql: sqlToRun, timestamp: new Date().toISOString(), execTime: res.execution_time });
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setExecuting(false);
-    }
-  };
-
-  const activeSQL = isEditing ? editSQL : generatedSQL;
+  const handleExecute = () => execute(isEditing ? editSQL : generatedSQL);
 
   return (
     <div className="page-content">
-      <div className="page-header">
-        <div>
-          <div className="page-title">◈ Natural Language Query</div>
-          <div className="page-subtitle">Describe what you want — SQL is generated automatically</div>
-        </div>
+      <PageHeader icon="◈" title="Natural Language Query" subtitle="Describe what you want — SQL is generated automatically">
         <span className="tag tag-amber" style={{ marginLeft: 'auto' }}>Beta</span>
-      </div>
+      </PageHeader>
 
       <div className="split-layout">
         {/* Left: Input */}
@@ -91,7 +72,7 @@ export default function NLQueryPage({ onAddHistory }) {
                   {generating ? <><div className="spinner" /> Generating...</> : '◈ Generate SQL'}
                 </button>
                 {generatedSQL && (
-                  <button className="btn btn-green" onClick={execute} disabled={executing}>
+                  <button className="btn btn-green" onClick={handleExecute} disabled={executing}>
                     {executing ? <><div className="spinner" /> Executing...</> : '▶ Execute'}
                   </button>
                 )}
@@ -116,37 +97,16 @@ export default function NLQueryPage({ onAddHistory }) {
 
         {/* Right: Output */}
         <div className="section-gap">
+          {nlError && <div className="alert alert-error">⚠ {nlError}</div>}
           {error && <div className="alert alert-error">⚠ {error}</div>}
-
-          {/* SQL Preview or Edit */}
           {isEditing ? (
-            <div className="card">
-              <div className="card-header" style={{ justifyContent: 'space-between' }}>
-                <span className="card-title">Edit Generated SQL</span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 11 }}
-                    onClick={() => { setIsEditing(false); setEditSQL(generatedSQL); }}>
-                    ✕ Cancel
-                  </button>
-                  <button className="btn btn-primary" style={{ padding: '4px 10px', fontSize: 11 }}
-                    onClick={() => { setGeneratedSQL(editSQL); setIsEditing(false); }}>
-                    ✓ Save
-                  </button>
-                </div>
-              </div>
-              <div className="card-body">
-                <textarea
-                  className="form-control"
-                  style={{ minHeight: 180, fontSize: 13 }}
-                  value={editSQL}
-                  onChange={e => setEditSQL(e.target.value)}
-                  spellCheck={false}
-                />
-                <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-2)' }}>
-                  ✏ Editing manually — click Save then Execute
-                </div>
-              </div>
-            </div>
+            <SqlEditor
+              title="Edit Generated SQL"
+              sql={editSQL}
+              onChange={setEditSQL}
+              onSave={() => { setGeneratedSQL(editSQL); setIsEditing(false); }}
+              onCancel={() => { setIsEditing(false); setEditSQL(generatedSQL); }}
+            />
           ) : (
             <QueryPreview
               sql={generatedSQL}
@@ -154,35 +114,7 @@ export default function NLQueryPage({ onAddHistory }) {
             />
           )}
 
-          {/* Results */}
-          {result ? (
-            <div className="card">
-              <div className="card-header" style={{ justifyContent: 'space-between' }}>
-                <span className="card-title">Results</span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <span className="tag tag-green">{result.data?.length ?? 0} rows</span>
-                  {result.execution_time && <span className="tag tag-amber">⏱ {result.execution_time}</span>}
-                </div>
-              </div>
-              <div className="card-body" style={{ padding: 0 }}>
-                <ResultTable
-                  columns={result.columns}
-                  data={result.data}
-                  execTime={result.execution_time}
-                  rowCount={result.data?.length}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="card">
-              <div className="card-body">
-                <div className="empty-state">
-                  <div className="empty-icon">◈</div>
-                  <p>Generated SQL and results will appear here</p>
-                </div>
-              </div>
-            </div>
-          )}
+          <ResultsCard result={result} emptyIcon="◈" emptyMessage="Generated SQL and results will appear here" />
         </div>
       </div>
     </div>

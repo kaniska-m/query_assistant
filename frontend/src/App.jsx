@@ -16,6 +16,19 @@ const NAV_LINKS = [
 
 function Shell({ history, onAddHistory }) {
   const location = useLocation();
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
+
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    localStorage.setItem('theme', next);
+    document.documentElement.setAttribute('data-theme', next);
+  };
+
+  // Apply saved theme on mount
+  useState(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  });
 
   return (
     <div className="app-shell">
@@ -27,6 +40,14 @@ function Shell({ history, onAddHistory }) {
         <span className="topbar-db-badge">● gemsdb</span>
 
         <nav className="topbar-nav">
+          <button
+            className="nav-btn"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            style={{ fontSize: 15, padding: '6px 10px' }}
+          >
+            {theme === 'dark' ? '☀' : '◑'}
+          </button>
           {NAV_LINKS.map(({ to, label, exact }) => (
             <NavLink
               key={to}

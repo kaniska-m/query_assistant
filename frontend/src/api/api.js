@@ -18,9 +18,10 @@ export const api = {
   getTables: () => request("GET", "/tables"),
   getColumns: (table) => request("GET", `/tables/${table}/columns`),
   getColumnValues: (table, column) =>
-    request("GET", `/tables/${table}/columns/${column}/values`),
+  request("GET", `/tables/${table}/columns/${column}/values`),
   generateQuery: (payload) => request("POST", "/query-builder/generate", payload),
   executeBuilderQuery: (payload) => request("POST", "/query-builder/execute", payload),
   nlToSQL: (prompt) => request("POST", "/nl-to-sql", { prompt }),
   executeSQL: (sql) => request("POST", "/execute_sql", { query: sql }),
+
 };

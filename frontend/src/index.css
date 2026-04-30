@@ -23,7 +23,31 @@
   --sans: 'Syne', sans-serif;
 }
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* Light mode overrides */
+[data-theme="light"] {
+  --bg-0: #f4f5f7;
+  --bg-1: #ffffff;
+  --bg-2: #eef0f4;
+  --bg-3: #e4e7ed;
+  --border: #d0d4de;
+  --border-bright: #b0b8cc;
+  --text-0: #1a1d2e;
+  --text-1: #4a5068;
+  --text-2: #8890aa;
+  --amber: #c47d0e;
+  --amber-dim: #a06508;
+  --amber-glow: rgba(196, 125, 14, 0.1);
+  --green: #1a9e5c;
+  --green-dim: #157a47;
+  --red: #d93545;
+  --blue: #3060d0;
+  --purple: #6040c0;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box; margin: 0; padding: 0;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.15s ease;
+}
 
 body {
   font-family: var(--mono);
@@ -253,14 +277,18 @@ textarea.form-control { resize: vertical; min-height: 120px; line-height: 1.7; }
 .result-table-wrap {
   overflow-x: auto;
   overflow-y: auto;
-  width : 100%;
   max-height: 420px;
   border-radius: var(--radius);
+  width: 100%;
 }
 
+.result-table-wrap::-webkit-scrollbar { width: 6px; height: 6px; }
+.result-table-wrap::-webkit-scrollbar-track { background: var(--bg-2); }
+.result-table-wrap::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+.result-table-wrap::-webkit-scrollbar-corner { background: var(--bg-2); }
+
 .result-table {
-  
-  width: max-content; 
+  width: max-content;
   min-width: 100%;
   border-collapse: collapse;
   font-size: 12px;
@@ -285,11 +313,11 @@ textarea.form-control { resize: vertical; min-height: 120px; line-height: 1.7; }
   padding: 8px 14px;
   border-bottom: 1px solid var(--border);
   color: var(--text-1);
-  max-width: 240px;
+  min-width: 120px;
+  max-width: 280px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 120px;
 }
 
 .result-table tr:hover td { background: var(--bg-2); color: var(--text-0); }

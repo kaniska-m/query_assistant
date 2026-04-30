@@ -1,13 +1,16 @@
 export default function ResultTable({ columns = [], data = [], execTime, rowCount }) {
   if (!columns.length) return null;
 
+  // Backend returns data as array-of-arrays [[val1, val2, ...], ...]
+  // Normalize to array-of-objects for consistent rendering
   const rows = data.map((row) => {
     if (Array.isArray(row)) {
+      // array → zip with columns
       const obj = {};
       columns.forEach((col, i) => { obj[col] = row[i]; });
       return obj;
     }
-    return row;
+    return row; // already an object
   });
 
   const displayVal = (v) => {
@@ -29,7 +32,9 @@ export default function ResultTable({ columns = [], data = [], execTime, rowCoun
         <table className="result-table">
           <thead>
             <tr>
-              {columns.map((col) => <th key={col}>{col}</th>)}
+              {columns.map((col) => (
+                <th key={col}>{col}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -43,7 +48,9 @@ export default function ResultTable({ columns = [], data = [], execTime, rowCoun
               rows.map((row, i) => (
                 <tr key={i}>
                   {columns.map((col) => (
-                    <td key={col} title={String(row[col] ?? '')}>{displayVal(row[col])}</td>
+                    <td key={col} title={String(row[col] ?? '')}>
+                      {displayVal(row[col])}
+                    </td>
                   ))}
                 </tr>
               ))
