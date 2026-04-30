@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { api } from '../api/api';
 import QueryPreview from '../components/QueryPreview';
 import ResultTable from '../components/ResultTable';
+import ExportButton from '../components/ExportButton';  
 
 const EXAMPLES = [
-  'Show 10 active ONTs from RM_ONT where APP_STATUS is READY',
+  'Show 10 active ONTs from RM_ONT where APP_STATUS is Active and the ont_id is 123',
   'Find RM_ONT_HISTORY records for serial number CDTB-88:0:0:13 in 2019',
   'Count RM_ONT records grouped by APP_STATUS',
   'Show RM_ONT where PHY_STATUS is ACTIVATED ordered by TIME_STAMP',
@@ -94,6 +95,7 @@ export default function NLQueryPage({ onAddHistory }) {
                     {executing ? <><div className="spinner" /> Executing...</> : '▶ Execute'}
                   </button>
                 )}
+                <ExportButton columns={result?.columns || []} data={result?.data || []} />
               </div>
             </div>
           </div>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '../api/api';
 import QueryPreview from './QueryPreview';
 import ResultTable from './ResultTable';
+import ExportButton from '../components/ExportButton';  
 
 const SCHEMAS = {
   RM_ONT: {
@@ -378,6 +379,7 @@ export default function SmartQueryBuilder({ onAddHistory }) {
               {executing ? <><div className="spinner" /> Executing...</> : '▶ Execute Query'}
             </button>
             <button className="btn btn-ghost" onClick={resetForm}>↺ Reset</button>
+            <ExportButton columns={result?.columns || []} data={result?.data || []} />
           </div>
         </div>
 

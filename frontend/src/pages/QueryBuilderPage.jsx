@@ -6,6 +6,7 @@ import FilterBuilder from '../components/FilterBuilder';
 import QueryPreview from '../components/QueryPreview';
 import ResultTable from '../components/ResultTable';
 import SmartQueryBuilder from '../components/SmartQueryBuilder';
+import ExportButton from '../components/ExportButton';  
 
 const DEFAULT_FILTERS = { logic: 'AND', conditions: [] };
 
@@ -234,6 +235,7 @@ export default function QueryBuilderPage({ onAddHistory }) {
             >
               {executing ? <><div className="spinner" /> Executing...</> : '▶ Execute'}
             </button>
+            <ExportButton columns={result?.columns || []} data={result?.data || []} />
           </div>
         </div>
 
