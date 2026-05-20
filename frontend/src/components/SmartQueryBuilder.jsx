@@ -6,7 +6,7 @@ import SqlEditor from './ui/SqlEditor';
 import ResultsCard from './ui/ResultsCard';
 import ExportButton from './ExportButton';
 
-export default function SmartQueryBuilder({ onAddHistory }) {
+export default function SmartQueryBuilder({ onAddHistory, selectedDb }) {
   const [activeTable, setActiveTable] = useState('RM_ONT');
   const [forms, setForms] = useState({
     RM_ONT: defaultForm(SCHEMAS.RM_ONT),
@@ -15,7 +15,7 @@ export default function SmartQueryBuilder({ onAddHistory }) {
   const [sqls, setSqls] = useState({ RM_ONT: '', RM_ONT_HISTORY: '' });
   const [editSQL, setEditSQL] = useState('');
   const [isEditing, setIsEditing] = useState(false);
-  const { result, executing, error, execute, reset: resetResult } = useQueryExecution(onAddHistory);
+  const { result, executing, error, execute, reset: resetResult } = useQueryExecution(onAddHistory, selectedDb);
 
   const schema = SCHEMAS[activeTable];
   const form = forms[activeTable];

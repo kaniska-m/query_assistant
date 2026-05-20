@@ -6,6 +6,7 @@ async function request(method, path, body = null) {
     headers: { "Content-Type": "application/json" },
   };
   if (body) opts.body = JSON.stringify(body);
+
   const res = await fetch(`${BASE_URL}${path}`, opts);
   if (!res.ok) {
     const err = await res.text();
@@ -15,13 +16,34 @@ async function request(method, path, body = null) {
 }
 
 export const api = {
-  getTables: () => request("GET", "/tables"),
-  getColumns: (table) => request("GET", `/tables/${table}/columns`),
-  getColumnValues: (table, column) =>
-  request("GET", `/tables/${table}/columns/${column}/values`),
-  generateQuery: (payload) => request("POST", "/query-builder/generate", payload),
-  executeBuilderQuery: (payload) => request("POST", "/query-builder/execute", payload),
-  nlToSQL: (prompt) => request("POST", "/nl-to-sql", { prompt }),
-  executeSQL: (sql) => request("POST", "/execute_sql", { query: sql }),
+  // ── DB list ───────────────────────────────────────────────────
+  getDatabases: () =>
+    request("GET", "/databases"),
 
+  // ── Metadata — db_name passed as query param ─────────────────
+  getTables: (db_name) =>
+    request("GET", `/tables?db_name=${encodeURIComponent(db_name)}`),
+
+  getColumns: (table, db_name) =>
+    request("GET", `/tables/${table}/columns?db_name=${encodeURIComponent(db_name)}`),
+
+  getColumnValues: (table, column, db_name) =>
+    request("GET", `/tables/${table}/columns/${column}/values?db_name=${encodeURIComponent(db_name)}`),
+
+  // ── Query builder — db_name inside POST body ─────────────────
+  generateQuery: (payload) =>
+    request("POST", "/query-builder/generate", payload),
+  // Note: payload must include db_name field
+
+  executeBuilderQuery: (payload) =>
+    request("POST", "/query-builder/execute", payload),
+  // Note: payload must include db_name field
+
+  // ── NL to SQL ─────────────────────────────────────────────────
+  nlToSQL: (prompt, db_name) =>
+    request("POST", "/nl-to-sql", { prompt, db_name }),
+
+  // ── Direct SQL executor ───────────────────────────────────────
+  executeSQL: (sql, db_name) =>
+    request("POST", "/execute_sql", { query: sql, db_name }),
 };

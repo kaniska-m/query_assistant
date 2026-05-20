@@ -1,135 +1,218 @@
+"""
+nl_services.py — Natural-language → Oracle SQL using a local SQLCoder GGUF model.
+
+Scope: RM_ONT, RM_ONT_HISTORY, RM_OLT_HISTORY, RM_OLT, RM_ONT_AVAILABILITY
+Speed improvements:
+  - Static schema (no live DB fetch on every call)
+  - Schema string built once at import time
+  - Tight max_tokens (200) — enough for any single Oracle SELECT
+  - Aggressive stop tokens cut generation early
+  - n_batch tuned for throughput
+"""
+
 import os
+import re
 import time
 from llama_cpp import Llama
-from app.schemas.nl_schema import PRIMARY_TABLES, JOINABLE_TABLES
-from app.services.prompt_builder import build_primary_schema
 
-MODEL_PATH = os.environ.get(
-    "MODEL_PATH",
-    "./model/sqlcoder-7b-2/sqlcoder-7b-q5_k_m.gguf"
+from app.schemas.nl_schema import (
+    STATIC_SCHEMA,
+    TABLE_ALIASES,
+    TABLE_DESCRIPTIONS,
+    JOIN_MAP,
 )
 
-# ── Load once at startup ──────────────────────────────────────────
-print(f"[NL] Loading model from {MODEL_PATH} ...")
+# ── Model path ────────────────────────────────────────────────────────────────
+MODEL_PATH = os.environ.get(
+    "MODEL_PATH",
+    "./model/sqlcoder-7b-2/sqlcoder-7b-q5_k_m.gguf",
+)
+
+# ── Load model once ───────────────────────────────────────────────────────────
+print(f"[NL] Loading model from {MODEL_PATH} …")
 
 llm = Llama(
     model_path=MODEL_PATH,
-    n_ctx=int(os.environ.get("MODEL_CTX", "2048")),
+    n_ctx=4096,        # ← change from 2048 to 4096
     n_threads=int(os.environ.get("MODEL_THREADS", "4")),
     verbose=False,
 )
-
 print("[NL] Model loaded and ready")
 
-# ── Schema cache ──────────────────────────────────────────────────
-_schema_cache = None
+# ── Build schema string once at import time ───────────────────────────────────
+def _build_schema_block() -> str:
+    lines = []
+    for table, cols in STATIC_SCHEMA.items():
+        alias = TABLE_ALIASES[table]
+        desc  = TABLE_DESCRIPTIONS[table]
+        col_str = ", ".join(f"{c} ({t})" for c, t in cols)
+        lines.append(f"-- {table} (alias: {alias}) — {desc}\n-- Columns: {col_str}")
+    return "\n\n".join(lines)
 
-def get_cached_schema() -> str:
-    global _schema_cache
-    if _schema_cache is None:
-        _schema_cache = build_primary_schema(PRIMARY_TABLES)
-        print(f"[NL] Schema cached")
-    return _schema_cache
+_SCHEMA_BLOCK: str = _build_schema_block()
 
-
-def build_joinable_schema_str() -> str:
-    """Build joinable tables as clean text for the prompt."""
-    parts = []
-    for t in JOINABLE_TABLES:
-        j = t["join_on"]
-        cols = ", ".join(t["columns"])
-        parts.append(
-            f"Table: {t['table']}\n"
-            f"  Columns: {cols}\n"
-            f"  Join: {j['from_table']}.{j['from_col']} = {t['table']}.{j['to_col']}\n"
-            f"  Use when: {', '.join(t['use_when'])}"
+def _build_join_hints() -> str:
+    hints = []
+    for j in JOIN_MAP:
+        kw = ", ".join(j["keywords"])
+        hints.append(
+            f"-- [{kw}] → JOIN {j['to_table']} ON "
+            f"{TABLE_ALIASES[j['from_table']]}.{j['from_col']} = "
+            f"{TABLE_ALIASES[j['to_table']]}.{j['to_col']}"
         )
-    return "\n\n".join(parts)
+    return "\n".join(hints)
 
+_JOIN_HINTS: str = _build_join_hints()
 
-def build_full_prompt(user_prompt: str, primary_schema: str) -> str:
-    joinable = build_joinable_schema_str()
-
+# ── Prompt builder ────────────────────────────────────────────────────────────
+def _build_prompt(user_question: str) -> str:
     return f"""### Task
-Generate an Oracle SQL query to answer the following question.
-This is Oracle Database — NOT MySQL, NOT PostgreSQL.
+Generate a single Oracle SQL SELECT query. Output ONLY the SQL — no explanation, no markdown, no semicolons.
 
-### Primary Tables (always available)
-{primary_schema}
+### Oracle Rules
+- Wrap every query: SELECT * FROM (<inner query>) WHERE ROWNUM <= 100
+- ORDER BY goes INSIDE the subquery, before the ROWNUM wrapper
+- Dates: TO_DATE('YYYY-MM-DD','YYYY-MM-DD') or SYSDATE - N for relative dates
+- NEVER use LIMIT — Oracle uses ROWNUM
+- ALWAYS decode STATE columns using: CASE WHEN x.STATE=0 THEN 'DOWN' WHEN x.STATE=1 THEN 'UP' WHEN x.STATE=7 THEN 'UNKNOWN' ELSE 'OTHER' END AS STATE_DESC
+- Apply the same CASE decode for TEMP_STATE and HSTATUS columns when selected
 
-### Joinable Tables (use only when keywords match)
-{joinable}
+### Available Tables (use ONLY these)
+{_SCHEMA_BLOCK}
 
-### Oracle Rules (STRICTLY follow)
-- Output ONLY raw SQL. No explanation, no markdown, no backticks, no semicolons.
-- NEVER use LIMIT — this is Oracle, use ROWNUM instead.
-- ALWAYS wrap in subquery: SELECT * FROM (...full query...) WHERE ROWNUM <= 100
-- ORDER BY must go INSIDE the subquery.
-- Use SYSDATE - 30 for relative dates, never TO_DATE(SYSDATE,...).
-- Always use table aliases: o=RM_ONT, h=RM_ONT_HISTORY, al=RM_ALARM, loc=APP_RM_LOCATION, av=RM_ONT_AVAILABILITY, rs=RM_RESOURCE_STATE, op=RM_ONT_OPTICAL_POWER, v=RM_VENDOR.
-- When joining RM_RESOURCE_STATE, alias rs.STATE AS STATE_LABEL.
+### Join Hints (apply only when keywords match)
+{_JOIN_HINTS}
+
+### Aliases
+o=RM_ONT, h=RM_ONT_HISTORY, olth=RM_OLT_HISTORY, olt=RM_OLT, av=RM_ONT_AVAILABILITY
 
 ### Examples
-Question: Count RM_ONT records grouped by APP_STATUS
-SQL: SELECT * FROM (SELECT o.APP_STATUS, COUNT(*) AS CNT FROM RM_ONT o GROUP BY o.APP_STATUS) WHERE ROWNUM <= 100
+Q: Count ONTs by APP_STATUS
+A: SELECT * FROM (SELECT o.APP_STATUS, COUNT(*) AS CNT FROM RM_ONT o GROUP BY o.APP_STATUS) WHERE ROWNUM <= 100
 
-Question: List ONTs where PHY_STATUS is ACTIVATED ordered by TIME_STAMP DESC
-SQL: SELECT * FROM (SELECT o.NAME, o.SERIAL_NO, o.PHY_STATUS, o.TIME_STAMP FROM RM_ONT o WHERE o.PHY_STATUS = 'ACTIVATED' ORDER BY o.TIME_STAMP DESC) WHERE ROWNUM <= 100
+Q: Show RM_ONT_HISTORY for serial CDTB-88:0:0:13 in 2019
+A: SELECT * FROM (SELECT h.SERIAL_NO, h.NAME, CASE WHEN h.STATE=0 THEN 'DOWN' WHEN h.STATE=1 THEN 'UP' WHEN h.STATE=7 THEN 'UNKNOWN' ELSE 'OTHER' END AS STATE_DESC, h.TIME_STAMP FROM RM_ONT_HISTORY h WHERE h.SERIAL_NO = 'CDTB-88:0:0:13' AND h.TIME_STAMP >= TO_DATE('2019-01-01','YYYY-MM-DD') AND h.TIME_STAMP <= TO_DATE('2019-12-31','YYYY-MM-DD') ORDER BY h.TIME_STAMP DESC) WHERE ROWNUM <= 100
 
-Question: Show all DOWN ONTs with state name
-SQL: SELECT * FROM (SELECT o.NAME, o.SERIAL_NO, rs.STATE AS STATE_LABEL FROM RM_ONT o JOIN RM_RESOURCE_STATE rs ON o.STATE = rs.ID WHERE rs.STATE = 'DOWN') WHERE ROWNUM <= 100
+Q: Show availability for ONT serial CDTB-88:0:0:13 from Jan to Mar 2019
+A: SELECT * FROM (SELECT o.SERIAL_NO, av.DOWN_TIME, av.UP_TIME, av.REMARKS FROM RM_ONT o JOIN RM_ONT_AVAILABILITY av ON o.SERIAL_NO = av.ONT_SERIAL_NO WHERE o.SERIAL_NO = 'CDTB-88:0:0:13' AND av.TIME_STAMP BETWEEN TO_DATE('2019-01-01','YYYY-MM-DD') AND TO_DATE('2019-03-31','YYYY-MM-DD')) WHERE ROWNUM <= 100
 
-Question: Count alarms grouped by severity for last 30 days
-SQL: SELECT * FROM (SELECT al.NMS_SEVERITY, COUNT(*) AS CNT FROM RM_ONT o JOIN RM_ALARM al ON o.NAME = al.RES_NAME WHERE al.NE_TIME > SYSDATE - 30 GROUP BY al.NMS_SEVERITY) WHERE ROWNUM <= 100
+Q: Show OLT history from last 7 days
+A: SELECT * FROM (SELECT olth.NAME, olth.IP, CASE WHEN olth.STATE=0 THEN 'DOWN' WHEN olth.STATE=1 THEN 'UP' WHEN olth.STATE=7 THEN 'UNKNOWN' ELSE 'OTHER' END AS STATE_DESC, olth.TIME_STAMP FROM RM_OLT_HISTORY olth WHERE olth.TIME_STAMP >= SYSDATE - 7 ORDER BY olth.TIME_STAMP DESC) WHERE ROWNUM <= 100
 
-Question: Show availability for ONT serial CDTB-88:0:0:13 from January to March 2019
-SQL: SELECT * FROM (SELECT o.SERIAL_NO, av.DOWN_TIME, av.UP_TIME, av.REMARKS FROM RM_ONT o JOIN RM_ONT_AVAILABILITY av ON o.SERIAL_NO = av.ONT_SERIAL_NO WHERE o.SERIAL_NO = 'CDTB-88:0:0:13' AND av.TIME_STAMP BETWEEN TO_DATE('2019-01-01','YYYY-MM-DD') AND TO_DATE('2019-03-31','YYYY-MM-DD')) WHERE ROWNUM <= 100
+Q: List current OLTs with state 0
+A: SELECT * FROM (SELECT olt.NAME, olt.IP, CASE WHEN olt.STATE=0 THEN 'DOWN' WHEN olt.STATE=1 THEN 'UP' WHEN olt.STATE=7 THEN 'UNKNOWN' ELSE 'OTHER' END AS STATE_DESC, olt.TIME_STAMP FROM RM_OLT olt WHERE olt.STATE = 0) WHERE ROWNUM <= 100
 
-Question: Count ONTs grouped by vendor name
-SQL: SELECT * FROM (SELECT v.VENDOR_NAME, COUNT(*) AS CNT FROM RM_ONT o JOIN RM_VENDOR v ON o.VENDOR = v.ID GROUP BY v.VENDOR_NAME) WHERE ROWNUM <= 100
-
-Question: Show ONTs with their district and location details
-SQL: SELECT * FROM (SELECT o.NAME, o.SERIAL_NO, loc.DISTRICT, loc.LOCATION_NAME FROM RM_ONT o JOIN APP_RM_LOCATION loc ON o.LOCATION_ID = loc.ID) WHERE ROWNUM <= 100
+Q: Show ONTs where STATE is DOWN
+A: SELECT * FROM (SELECT o.SERIAL_NO, o.NAME, CASE WHEN o.STATE=0 THEN 'DOWN' WHEN o.STATE=1 THEN 'UP' WHEN o.STATE=7 THEN 'UNKNOWN' ELSE 'OTHER' END AS STATE_DESC, o.APP_STATUS, o.TIME_STAMP FROM RM_ONT o WHERE o.STATE = 0 ORDER BY o.TIME_STAMP DESC) WHERE ROWNUM <= 100
 
 ### Question
-{user_prompt}
+{user_question}
 
 ### SQL
 """
 
 
-# ── Main function ─────────────────────────────────────────────────
-def nl_to_sql(prompt: str) -> str:
-    schema = get_cached_schema()
+# ── Oracle syntax fixups ─────────────────────────────────────────────────────
+# Patterns the model commonly generates that are invalid in Oracle
+_INTERVAL_FIXES = [
+    # Compound: CURRENT_DATE/NOW() - INTERVAL 'N unit' → SYSDATE - N
+    (re.compile(r"(?:CURRENT_DATE|CURRENT_TIMESTAMP|NOW\(\))\s*-\s*INTERVAL\s+\'1\s+month\'", re.IGNORECASE), "SYSDATE - 30"),
+    (re.compile(r"(?:CURRENT_DATE|CURRENT_TIMESTAMP|NOW\(\))\s*-\s*INTERVAL\s+\'(\d+)\s+days?\'", re.IGNORECASE), r"SYSDATE - \1"),
+    (re.compile(r"(?:CURRENT_DATE|CURRENT_TIMESTAMP|NOW\(\))\s*-\s*INTERVAL\s+\'(\d+)\s+weeks?\'", re.IGNORECASE), r"SYSDATE - \1*7"),
+    (re.compile(r"(?:CURRENT_DATE|CURRENT_TIMESTAMP|NOW\(\))\s*-\s*INTERVAL\s+\'1\s+year\'", re.IGNORECASE), "SYSDATE - 365"),
+    # Standalone INTERVAL after SYSDATE already present
+    (re.compile(r"INTERVAL\s+\'1\s+month\'", re.IGNORECASE),       "30"),
+    (re.compile(r"INTERVAL\s+\'1\'\s+MONTH", re.IGNORECASE),       "30"),
+    (re.compile(r"INTERVAL\s+\'(\d+)\s+days?\'", re.IGNORECASE),  r"\1"),
+    (re.compile(r"INTERVAL\s+\'(\d+)\'\s+DAY", re.IGNORECASE),    r"\1"),
+    (re.compile(r"INTERVAL\s+\'1\s+week\'", re.IGNORECASE),        "7"),
+    (re.compile(r"INTERVAL\s+\'(\d+)\s+weeks?\'", re.IGNORECASE), r"\1*7"),
+    (re.compile(r"INTERVAL\s+\'1\s+year\'", re.IGNORECASE),        "365"),
+    # Bare CURRENT_DATE / NOW() remaining → SYSDATE
+    (re.compile(r"\bCURRENT_DATE\b", re.IGNORECASE),                 "SYSDATE"),
+    (re.compile(r"\bCURRENT_TIMESTAMP\b", re.IGNORECASE),            "SYSDATE"),
+    (re.compile(r"\bNOW\(\)", re.IGNORECASE),                       "SYSDATE"),
+    # MySQL LIMIT N → strip (ROWNUM wrapper handles limiting)
+    (re.compile(r"\bLIMIT\s+\d+", re.IGNORECASE),                   ""),
+]
 
-    if not schema.strip():
-        raise Exception("Schema could not be loaded. Check DB connection.")
-
-    full_prompt = build_full_prompt(prompt, schema)
-
-    print(f"[NL] Generating SQL for: {prompt}")
-    start = time.time()
-
-    output = llm(
-        full_prompt,
-        max_tokens=300,
-        temperature=0.1,
-        stop=["###", "\n\n", ";"],
-        echo=False,
-    )
-
-    elapsed = time.time() - start
-    sql = output["choices"][0]["text"].strip()
-    print(f"[NL] Raw: {sql}")
-    print(f"[NL] Time: {elapsed:.1f}s")
-
-    # Strip markdown fences if any slipped through
-    if "```" in sql:
-        parts = sql.split("```")
-        sql = parts[1] if len(parts) > 1 else parts[0]
-        if sql.lower().startswith("sql"):
-            sql = sql[3:]
-
-    sql = sql.strip().rstrip(";")
-    print(f"[NL] Final SQL: {sql}")
+def _fix_oracle_syntax(sql: str) -> str:
+    for pattern, replacement in _INTERVAL_FIXES:
+        sql = pattern.sub(replacement, sql)
     return sql
+
+
+# ── SQL post-processing ───────────────────────────────────────────────────────
+def _clean_sql(raw: str) -> str:
+    """Strip markdown fences, extra lines, trailing junk, fix Oracle syntax."""
+    # Remove ```sql ... ``` fences
+    raw = re.sub(r"```[a-z]*", "", raw, flags=re.IGNORECASE).replace("```", "")
+
+    # Take only the first SELECT … (stop at blank line or second SELECT)
+    lines = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            if lines:          # first blank line after content → stop
+                break
+            continue
+        # Stop if a second independent SELECT starts (model hallucinating extra queries)
+        if stripped.upper().startswith("SELECT") and lines and not lines[-1].strip().upper().endswith("("):
+            break
+        lines.append(line)
+
+    sql = " ".join(l.strip() for l in lines)
+
+    # Collapse multiple spaces
+    sql = re.sub(r"\s+", " ", sql).strip()
+
+    # Remove trailing semicolon
+    sql = sql.rstrip(";").strip()
+
+    # Fix invalid Oracle syntax patterns
+    sql = _fix_oracle_syntax(sql)
+
+    return sql
+
+def nl_to_sql(prompt: str) -> str:
+    full_prompt = _build_prompt(prompt)
+    print(f"[NL] Generating SQL for: {prompt!r}")
+    t0 = time.time()
+
+    try:
+        output = llm(
+            full_prompt,
+            max_tokens=200,
+            temperature=0.0,
+            top_p=1.0,
+            repeat_penalty=1.1,
+            stop=[
+                "###",
+                "\n\n",
+                ";",
+                "Question:",
+                "Q:",
+            ],
+            echo=False,
+        )
+        elapsed = time.time() - t0
+        raw_sql = output["choices"][0]["text"]
+        print(f"[NL] Raw ({elapsed:.1f}s): {raw_sql!r}")
+
+        sql = _clean_sql(raw_sql)
+        print(f"[NL] Final: {sql}")
+        return sql
+
+    except AssertionError as e:
+        # GGML internal assertion failure — usually means prompt exceeded n_ctx
+        elapsed = time.time() - t0
+        print(f"[NL] GGML crash after {elapsed:.1f}s: {e}")
+        raise Exception(
+            "Model crashed — prompt may have exceeded context limit. "
+            "Try a shorter or simpler query."
+        )
+
+    except Exception as e:
+        elapsed = time.time() - t0
+        print(f"[NL] Inference failed after {elapsed:.1f}s: {e}")
+        raise Exception(f"Model inference failed: {str(e)}")

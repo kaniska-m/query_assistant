@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/api';
 
-export default function ColumnSelector({ table, selected, onChange }) {
+export default function ColumnSelector({ table, selected, onChange, selectedDb }) {
   const [columns, setColumns] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!table) { setColumns([]); return; }
     setLoading(true);
-    api.getColumns(table)
+    api.getColumns(table, selectedDb)
       .then(d => setColumns(d.columns || []))
       .catch(() => setColumns([]))
       .finally(() => setLoading(false));

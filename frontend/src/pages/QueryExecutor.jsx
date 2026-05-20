@@ -10,9 +10,9 @@ const EXAMPLE_QUERIES = [
   'SELECT * FROM RM_ALARM WHERE ROWNUM <= 5',
 ];
 
-export default function QueryExecutor({ onAddHistory }) {
+export default function QueryExecutor({ onAddHistory, selectedDb }) {
   const [sql, setSql] = useState('');
-  const { result, executing, error, execute } = useQueryExecution(onAddHistory);
+  const { result, executing, error, execute } = useQueryExecution(onAddHistory, selectedDb);
 
   const clear = () => setSql('');
 
@@ -20,13 +20,19 @@ export default function QueryExecutor({ onAddHistory }) {
     <div className="page-content">
       <PageHeader icon="⌨" title="SQL Executor" subtitle="Run raw SQL queries — Ctrl+Enter to execute" />
 
+      {!selectedDb && (
+        <div className="alert alert-error" style={{ marginBottom: 16 }}>
+          ⚠ No database selected — go to <a href="/" style={{ color: 'var(--amber)' }}>Home</a> and choose a database first.
+        </div>
+      )}
+
       <div className="split-layout">
         {/* Left: Editor */}
         <div className="section-gap">
           <div className="card">
             <div className="card-header" style={{ justifyContent: 'space-between' }}>
               <span className="card-title">Query Editor</span>
-              <span className="tag tag-blue">gemsdb</span>
+              <span className="tag tag-blue">{selectedDb || 'no db'}</span>
             </div>
             <div className="card-body">
               <textarea
@@ -37,9 +43,14 @@ export default function QueryExecutor({ onAddHistory }) {
                 onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') execute(sql); }}
                 placeholder={"-- Write your SQL here\nSELECT * FROM RM_ONT WHERE ROWNUM <= 50"}
                 spellCheck={false}
+                disabled={!selectedDb}
               />
               <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-                <button className="btn btn-primary" onClick={() => execute(sql)} disabled={executing || !sql.trim()}>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => execute(sql)}
+                  disabled={executing || !sql.trim() || !selectedDb}
+                >
                   {executing ? <><div className="spinner" /> Running...</> : '▶ Execute'}
                 </button>
                 <button className="btn btn-ghost" onClick={clear}>✕ Clear</button>
