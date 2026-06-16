@@ -1,6 +1,31 @@
-venv/
+# Model files — too large for GitHub
+model/sqlcoder-7b-2/
+model/*.gguf
+model/*.safetensors
+model/*.bin
+model/*.npy
+
+# Python
 __pycache__/
-node_modules/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Environment variables — sensitive
 .env
-dist/
-build/
+*.env
+
+# Database
+*.db
+*.sqlite
+
+# VS Code
+.vscode/
+
+# Chroma DB vector store
+smart_qa/chroma_db/
+
+# Logs
+*.log

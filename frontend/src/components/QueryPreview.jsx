@@ -17,10 +17,29 @@ export default function QueryPreview({ sql, onEdit }) {
 
   const copy = () => {
     if (!sql) return;
-    navigator.clipboard.writeText(sql).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(sql).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      } else {
+        // Fallback for HTTP (non-secure context)
+        const ta = document.createElement('textarea');
+        ta.value = sql;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }
+    } catch (e) {
+      console.warn('Copy failed:', e);
+    }
   };
 
   return (

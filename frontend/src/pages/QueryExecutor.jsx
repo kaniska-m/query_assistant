@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { api } from '../api/api';
-import ResultTable from '../components/ResultTable';
+import { useQueryExecution } from '../hooks/useQueryExecution';
+import PageHeader from '../components/ui/PageHeader';
+import ResultsCard from '../components/ui/ResultsCard';
+import ExportButton from '../components/ExportButton';
 
 const EXAMPLE_QUERIES = [
   'SELECT * FROM RM_ONT WHERE ROWNUM <= 5',
@@ -8,41 +10,21 @@ const EXAMPLE_QUERIES = [
   'SELECT * FROM RM_ALARM WHERE ROWNUM <= 5',
 ];
 
-export default function QueryExecutor({ onAddHistory }) {
+export default function QueryExecutor({ onAddHistory, selectedDb }) {
   const [sql, setSql] = useState('');
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const { result, executing, error, execute } = useQueryExecution(onAddHistory, selectedDb);
 
-  const execute = async () => {
-    if (!sql.trim()) return;
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    const start = Date.now();
-    try {
-      const res = await api.executeSQL(sql);
-      setResult(res);
-      onAddHistory?.({ sql, timestamp: new Date().toISOString(), execTime: res.execution_time });
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleKeyDown = (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') execute();
-  };
+  const clear = () => setSql('');
 
   return (
     <div className="page-content">
-      <div className="page-header">
-        <div>
-          <div className="page-title">⌨ SQL Executor</div>
-          <div className="page-subtitle">Run raw SQL queries — Ctrl+Enter to execute</div>
+      <PageHeader icon="⌨" title="SQL Executor" subtitle="Run raw SQL queries — Ctrl+Enter to execute" />
+
+      {!selectedDb && (
+        <div className="alert alert-error" style={{ marginBottom: 16 }}>
+          ⚠ No database selected — go to <a href="/" style={{ color: 'var(--amber)' }}>Home</a> and choose a database first.
         </div>
-      </div>
+      )}
 
       <div className="split-layout">
         {/* Left: Editor */}
@@ -50,7 +32,7 @@ export default function QueryExecutor({ onAddHistory }) {
           <div className="card">
             <div className="card-header" style={{ justifyContent: 'space-between' }}>
               <span className="card-title">Query Editor</span>
-              <span className="tag tag-blue">gemsdb</span>
+              <span className="tag tag-blue">{selectedDb || 'no db'}</span>
             </div>
             <div className="card-body">
               <textarea
@@ -58,17 +40,21 @@ export default function QueryExecutor({ onAddHistory }) {
                 style={{ minHeight: 200, fontFamily: 'var(--mono)', fontSize: 13 }}
                 value={sql}
                 onChange={e => setSql(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="-- Write your SQL here&#10;SELECT * FROM RM_ONT WHERE STATUS = 'ACTIVE' LIMIT 50;"
+                onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') execute(sql); }}
+                placeholder={"-- Write your SQL here\nSELECT * FROM RM_ONT WHERE ROWNUM <= 50"}
                 spellCheck={false}
+                disabled={!selectedDb}
               />
-              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                <button className="btn btn-primary" onClick={execute} disabled={loading || !sql.trim()}>
-                  {loading ? <><div className="spinner" /> Running...</> : '▶ Execute'}
+              <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => execute(sql)}
+                  disabled={executing || !sql.trim() || !selectedDb}
+                >
+                  {executing ? <><div className="spinner" /> Running...</> : '▶ Execute'}
                 </button>
-                <button className="btn btn-ghost" onClick={() => { setSql(''); setResult(null); setError(null); }}>
-                  ✕ Clear
-                </button>
+                <button className="btn btn-ghost" onClick={clear}>✕ Clear</button>
+                <ExportButton columns={result?.columns || []} data={result?.data || []} />
               </div>
             </div>
           </div>
@@ -93,35 +79,7 @@ export default function QueryExecutor({ onAddHistory }) {
         {/* Right: Results */}
         <div className="section-gap">
           {error && <div className="alert alert-error">⚠ {error}</div>}
-
-          {result ? (
-            <div className="card">
-              <div className="card-header" style={{ justifyContent: 'space-between' }}>
-                <span className="card-title">Results</span>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <span className="tag tag-green">{result.data?.length ?? 0} rows</span>
-                  {result.execution_time && <span className="tag tag-amber">⏱ {result.execution_time}</span>}
-                </div>
-              </div>
-              <div className="card-body" style={{ padding: 0 }}>
-                <ResultTable
-                  columns={result.columns}
-                  data={result.data}
-                  execTime={result.execution_time}
-                  rowCount={result.data?.length}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="card">
-              <div className="card-body">
-                <div className="empty-state">
-                  <div className="empty-icon">◌</div>
-                  <p>Execute a query to see results here</p>
-                </div>
-              </div>
-            </div>
-          )}
+          <ResultsCard result={result} />
         </div>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/api';
+import ExcelImportFilter from './ExcelImportFilter';
 
 const OPERATORS = ['=', '!=', '>', '<', '>=', '<=', 'LIKE', 'IN', 'BETWEEN', 'IS NULL'];
 
@@ -10,7 +11,7 @@ function guessType(colName = '', colType = '') {
   return 'text';
 }
 
-function FilterRow({ row, columns, table, onChange, onRemove }) {
+function FilterRow({ row, columns, table, onChange, onRemove, selectedDb }) {
   const [colValues, setColValues] = useState([]);
   const [loadingVals, setLoadingVals] = useState(false);
 
@@ -21,7 +22,7 @@ function FilterRow({ row, columns, table, onChange, onRemove }) {
     if (!row.column || !table || colType !== 'text') { setColValues([]); return; }
     if (row.operator === 'IS NULL') return;
     setLoadingVals(true);
-    api.getColumnValues(table, row.column)
+    api.getColumnValues(table, row.column, selectedDb)
       .then(d => setColValues(d.values || []))
       .catch(() => setColValues([]))
       .finally(() => setLoadingVals(false));
@@ -88,7 +89,7 @@ function FilterRow({ row, columns, table, onChange, onRemove }) {
   );
 }
 
-export default function FilterBuilder({ table, columns, filters, onChange }) {
+export default function FilterBuilder({ table, columns, filters, onChange, selectedDb }) {
   const [logic, setLogic] = useState('AND');
 
   const addFilter = () => {
@@ -116,6 +117,27 @@ export default function FilterBuilder({ table, columns, filters, onChange }) {
     onChange({ ...filters, logic: val });
   };
 
+  // Called when ExcelImportFilter applies — merge imported conditions into existing filters
+  const handleExcelApply = (importedGroup) => {
+    if (importedGroup.isDateRangeMode) {
+      // Date range mode: pass groups array directly — sql_builder handles the nested OR
+      onChange({
+        logic: filters.logic || 'AND',
+        conditions: filters.conditions,
+        dateRangeGroups: importedGroup.groups,
+      });
+    } else {
+      const merged = {
+        logic: filters.logic || 'AND',
+        conditions: [
+          ...filters.conditions,
+          ...importedGroup.conditions,
+        ],
+      };
+      onChange(merged);
+    }
+  };
+
   return (
     <div className="form-group">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -135,13 +157,50 @@ export default function FilterBuilder({ table, columns, filters, onChange }) {
               ))}
             </div>
           )}
-          <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: 11 }} onClick={addFilter} disabled={!table}>
+          <button
+            className="btn btn-secondary"
+            style={{ padding: '4px 10px', fontSize: 11 }}
+            onClick={addFilter}
+            disabled={!table}
+          >
             + Add Filter
           </button>
         </div>
       </div>
 
-      {filters.conditions.length === 0 ? (
+      {/* Date range groups indicator (from Excel import) */}
+      {filters.dateRangeGroups && filters.dateRangeGroups.length > 0 && (
+        <div style={{
+          padding: '10px 14px',
+          background: 'rgba(0,200,120,0.07)',
+          border: '1px solid var(--green)',
+          borderRadius: 'var(--radius)',
+          marginBottom: 8,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 10,
+        }}>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>
+              ✓ Date Range Filter Active
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>
+              {filters.dateRangeGroups.length} rows from Excel — each with serial + date range (OR logic)
+            </div>
+          </div>
+          <button
+            className="btn btn-ghost"
+            style={{ fontSize: 11, padding: '4px 10px', color: 'var(--text-2)' }}
+            onClick={() => onChange({ logic: filters.logic, conditions: filters.conditions })}
+          >
+            ✕ Remove
+          </button>
+        </div>
+      )}
+
+      {/* Manual filters */}
+      {filters.conditions.length === 0 && !filters.dateRangeGroups ? (
         <div style={{ padding: '12px 0', color: 'var(--text-2)', fontSize: 12 }}>
           No filters applied — all rows will be returned.
         </div>
@@ -154,7 +213,7 @@ export default function FilterBuilder({ table, columns, filters, onChange }) {
                   <span className="tag tag-amber">{filters.logic}</span>
                 </div>
               )}
-              <FilterRow
+              <FilterRow selectedDb={selectedDb}
                 row={f}
                 columns={columns}
                 table={table}
@@ -164,6 +223,14 @@ export default function FilterBuilder({ table, columns, filters, onChange }) {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Excel import — shown only when a table is selected */}
+      {table && (
+        <ExcelImportFilter
+          dbColumns={columns}
+          onApply={handleExcelApply}
+        />
       )}
     </div>
   );
